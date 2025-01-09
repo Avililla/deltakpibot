@@ -1,0 +1,68 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Modelo para Servidores (Guilds)
+model Guild {
+  id               String           @id @default(uuid()) // ID interno
+  guildId          String           @unique // ID de Discord del servidor
+  name             String // Nombre del servidor
+  commandChannelId String? // ID del canal configurado para comandos
+  trackedChannels  TrackedChannel[] // Canales configurados para trackeo
+  trackedRoles     TrackedRole[] // Roles configurados para trackeo
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  MentionRecord    MentionRecord[]
+}
+
+// Modelo para Canales Trackeados
+model TrackedChannel {
+  id          String   @id @default(uuid()) // ID interno
+  guild       Guild    @relation(fields: [guildId], references: [guildId]) // Relación con Guild
+  guildId     String
+  channelId   String   @unique // ID de Discord del canal trackeado
+  name        String // Nombre del canal
+  isIntensive Boolean  @default(false) // Tipo de trackeo: intensivo o no intensivo
+  createdAt   DateTime @default(now())
+}
+
+// Modelo para Roles Trackeados
+model TrackedRole {
+  id        String   @id @default(uuid()) // ID interno
+  guild     Guild    @relation(fields: [guildId], references: [guildId]) // Relación con Guild
+  guildId   String
+  roleId    String   @unique // ID de Discord del rol trackeado
+  name      String // Nombre del rol
+  createdAt DateTime @default(now())
+}
+
+// Modelo para Registrar Menciones (opcional)
+model MentionRecord {
+  id          String    @id @default(uuid()) // ID interno
+  guild       Guild     @relation(fields: [guildId], references: [guildId]) // Relación con Guild
+  guildId     String
+  channelId   String // ID del canal donde ocurrió la mención
+  roleId      String // ID del rol mencionado
+  mentionedId String // ID del usuario mencionado
+  authorId    String // ID del usuario que mencionó
+  createdAt   DateTime  @default(now()) // Cuándo ocurrió la mención
+  respondedAt DateTime? // Cuándo respondió la persona mencionada
+}
+
+model UserContext {
+  id        String   @id @default(uuid())
+  userId    String   @unique // Discord ID del usuario
+  guildId   String   // Guild ID seleccionado
+  updatedAt DateTime @updatedAt
+}
