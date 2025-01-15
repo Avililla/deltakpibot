@@ -18,7 +18,6 @@ model Guild {
   id               String           @id @default(uuid()) // ID interno
   guildId          String           @unique // ID de Discord del servidor
   name             String // Nombre del servidor
-  commandChannelId String? // ID del canal configurado para comandos
   trackedChannels  TrackedChannel[] // Canales configurados para trackeo
   trackedRoles     TrackedRole[] // Roles configurados para trackeo
   createdAt        DateTime         @default(now())

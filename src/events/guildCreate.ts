@@ -30,6 +30,7 @@ export default {
       Para configurar el bot, utiliza los siguientes comandos:
       - \`!setserver <nombre del servidor>\`: Selecciona el servidor que deseas configurar.
       - \`!currentserver\`: Muestra el servidor que actualmente estás configurando.
+      - \`!getchannels\`: Devuelve los canales de texto disponibles para el servidor seleccionado.
       - \`!setCommandChannel #canal\`: Configura el canal donde se usarán los comandos del bot.
       - \`!addChannel #canal [intensivo/no-intensivo]\`: Añade un canal para seguimiento.
       - \`!addRole @rol\`: Añade un rol para seguimiento.
