@@ -1,67 +1,71 @@
 import {
+  SlashCommandBuilder,
+  InteractionContextType,
+  Guild,
   ActionRowBuilder,
-  ChannelType,
-  Message,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
+  Channel,
+  ChannelType,
 } from "discord.js";
+import { getOwnedGuilds } from "../../utils";
 import prisma from "../../db";
-import { isUserAdminOfGuild } from "../../utils";
 
-export default {
-  name: "settrackedchannels",
-  description:
-    "Configura los canales para seguimiento en el servidor seleccionado.",
-  async execute(message: Message) {
-    if (message.guild) {
-      return message.reply(
-        "Este comando solo puede ejecutarse desde un chat privado."
+export const command = {
+  data: new SlashCommandBuilder()
+    .setName("settrackedchannels")
+    .setDescription("Set tracked channels for the selected server.")
+    .setContexts(InteractionContextType.BotDM),
+  async execute(interaction: any) {
+    if (interaction.guild) {
+      await interaction.reply(
+        "This command can only be used in a direct message with the bot."
       );
+      return;
     }
 
-    // Verificar que el usuario es administrador de al menos un servidor donde esté el bot
-    const isAdmin = await isUserAdminOfGuild(message.client, message.author);
-    if (!isAdmin) {
-      return message.reply(
-        "No puedes usar este comando porque no eres administrador de ningún servidor donde esté el bot."
+    const ownedGuilds = await getOwnedGuilds(
+      interaction.client,
+      interaction.user
+    );
+    if (ownedGuilds.length === 0) {
+      await interaction.reply(
+        "You are not the owner of any server where I am present."
       );
+      return;
     }
 
-    // Obtener el contexto del servidor para el usuario actual
     const userContext = await prisma.userContext.findUnique({
-      where: { userId: message.author.id },
+      where: { userId: interaction.user.id },
     });
 
     if (!userContext) {
-      return message.reply(
-        "No tienes ningún servidor seleccionado actualmente. Usa `!setserver <nombre del servidor>` para seleccionar uno."
+      return interaction.reply(
+        "You don't have any server selected. Use `/setserver <server name>` to select one."
       );
     }
 
-    // Buscar información del servidor en el cliente del bot
-    const guild = message.client.guilds.cache.get(userContext.guildId);
+    const guild = interaction.client.guilds.cache.get(userContext.guildId);
 
     if (!guild) {
-      return message.reply(
-        "No se pudo encontrar el servidor seleccionado. Verifica que el bot sigue estando en el servidor."
+      return interaction.reply(
+        "The selected server could not be found. Make sure the bot is still in the server."
       );
     }
 
-    // Filtrar los canales de texto disponibles
     const textChannels = guild.channels.cache
-      .filter((channel) => channel.type === ChannelType.GuildText)
-      .map((channel) => ({
+      .filter((channel: any) => channel.type === ChannelType.GuildText)
+      .map((channel: any) => ({
         label: channel.name,
         value: channel.id,
       }));
 
     if (textChannels.length === 0) {
-      return message.reply(
-        "No hay canales de texto disponibles en este servidor para configurar."
+      return interaction.reply(
+        "There are no text channels available in this server to configure."
       );
     }
 
-    // Obtener los canales ya seleccionados
     const trackedChannels = await prisma.trackedChannel.findMany({
       where: { guildId: guild.id },
       select: { channelId: true },
@@ -69,14 +73,13 @@ export default {
 
     const trackedChannelIds = trackedChannels.map((tc) => tc.channelId);
 
-    // Crear un menú de selección
     const selectMenu = new StringSelectMenuBuilder()
       .setCustomId("select-tracked-channels")
       .setPlaceholder("Selecciona los canales para seguimiento")
       .setMinValues(0)
       .setMaxValues(textChannels.length)
       .addOptions(
-        textChannels.map((channel) => ({
+        textChannels.map((channel: any) => ({
           label: channel.label,
           value: channel.value,
           default: trackedChannelIds.includes(channel.value),
@@ -87,15 +90,13 @@ export default {
       selectMenu
     );
 
-    // Enviar el menú de selección al usuario
-    const sentMessage = await message.reply({
-      content: `Selecciona los canales de texto para configurarlos como canales de seguimiento en **${guild.name}**:`,
+    const sentMessage = await interaction.reply({
+      content: `Select the text channels to configure them as tracking channels in **${guild.name}**:`,
       components: [row],
     });
 
-    // Crear un colector de interacciones
     const filter = (interaction: any) =>
-      interaction.user.id === message.author.id &&
+      interaction.user.id === interaction.user.id &&
       interaction.customId === "select-tracked-channels";
 
     const collector = sentMessage.createMessageComponentCollector({
@@ -103,7 +104,7 @@ export default {
       time: 60000, // 1 minuto para responder
     });
 
-    collector.on("collect", async (interaction) => {
+    collector.on("collect", async (interaction: any) => {
       const selectedChannelIds = (interaction as StringSelectMenuInteraction)
         .values;
 
@@ -139,16 +140,18 @@ export default {
       }
 
       await interaction.reply({
-        content: `Los canales seleccionados se han actualizado correctamente.`,
+        content: "The channels have been configured successfully.",
         ephemeral: true,
       });
 
       collector.stop();
     });
 
-    collector.on("end", (collected) => {
+    collector.on("end", (collected: any) => {
       if (collected.size === 0) {
-        message.reply("No seleccionaste ningún canal. El comando ha expirado.");
+        interaction.reply(
+          "You did not select any channel. The command has expired."
+        );
       }
     });
   },

@@ -18,3 +18,31 @@ export async function isUserAdminOfGuild(
   // Si el usuario no es propietario de ningún servidor, devolver `false`
   return adminGuilds.size > 0;
 }
+
+/**
+ * Verifica si el usuario es propietario de alguno de los servidores donde está el bot.
+ *
+ * @param client - El cliente del bot de Discord.
+ * @param user - El usuario que ha invocado la interacción.
+ * @returns Una lista de servidores donde el usuario es propietario.
+ */
+export async function getOwnedGuilds(
+  client: Client,
+  user: User
+): Promise<string[]> {
+  const ownedGuilds: string[] = [];
+
+  try {
+    // Recorrer todos los servidores donde está el bot
+    for (const [guildId, guild] of client.guilds.cache) {
+      if (guild.ownerId === user.id) {
+        ownedGuilds.push(`${guild.name} (ID: ${guildId})`);
+      }
+    }
+
+    return ownedGuilds;
+  } catch (error) {
+    console.error("Error al verificar propiedad de servidores:", error);
+    return [];
+  }
+}

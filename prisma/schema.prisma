@@ -23,12 +23,13 @@ model Guild {
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   MentionRecord    MentionRecord[]
+  UserContext      UserContext[]
 }
 
 // Modelo para Canales Trackeados
 model TrackedChannel {
   id          String   @id @default(uuid()) // ID interno
-  guild       Guild    @relation(fields: [guildId], references: [guildId]) // Relación con Guild
+  guild       Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
   guildId     String
   channelId   String   @unique // ID de Discord del canal trackeado
   name        String // Nombre del canal
@@ -39,7 +40,7 @@ model TrackedChannel {
 // Modelo para Roles Trackeados
 model TrackedRole {
   id        String   @id @default(uuid()) // ID interno
-  guild     Guild    @relation(fields: [guildId], references: [guildId]) // Relación con Guild
+  guild     Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
   guildId   String
   roleId    String   @unique // ID de Discord del rol trackeado
   name      String // Nombre del rol
@@ -49,7 +50,7 @@ model TrackedRole {
 // Modelo para Registrar Menciones (opcional)
 model MentionRecord {
   id          String    @id @default(uuid()) // ID interno
-  guild       Guild     @relation(fields: [guildId], references: [guildId]) // Relación con Guild
+  guild       Guild     @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
   guildId     String
   channelId   String // ID del canal donde ocurrió la mención
   roleId      String // ID del rol mencionado
@@ -62,6 +63,7 @@ model MentionRecord {
 model UserContext {
   id        String   @id @default(uuid())
   userId    String   @unique // Discord ID del usuario
+  guild     Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
   guildId   String   // Guild ID seleccionado
   updatedAt DateTime @updatedAt
 }
