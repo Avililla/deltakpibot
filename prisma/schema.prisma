@@ -20,6 +20,7 @@ model Guild {
   name             String // Nombre del servidor
   trackedChannels  TrackedChannel[] // Canales configurados para trackeo
   trackedRoles     TrackedRole[] // Roles configurados para trackeo
+  ownerid            String // ID del dueño del servidor
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
   MentionRecord    MentionRecord[]

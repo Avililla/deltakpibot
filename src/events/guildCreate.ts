@@ -19,6 +19,7 @@ export async function execute(guild: Guild) {
         data: {
           guildId: guild.id,
           name: guild.name,
+          ownerid: owner.id,
         },
       });
     }
