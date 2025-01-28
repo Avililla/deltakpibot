@@ -59,6 +59,6 @@ jobs:
           password: ${{ secrets.SSH_KEY }}
           script: |
             cd deltakpi
-            docker-compose stop bot
-            docker-compose pull bot
-            docker-compose up -d bot
+            docker compose stop bot
+            docker compose pull bot
+            docker compose up -d bot
