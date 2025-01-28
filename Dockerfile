@@ -41,6 +41,7 @@ COPY --from=builder /app/package.json .
 COPY --from=builder /app/prisma ./prisma
 
 ENV NODE_ENV=production
-RUN chmod 755 entrypoint.sh
+COPY --chmod=755 entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY prisma ./prisma
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
