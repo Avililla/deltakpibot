@@ -24,7 +24,7 @@ const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN!);
   try {
     console.log("Registrando comandos...");
 
-    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID!), {
+    await rest.put(Routes.applicationCommands(process.env.DISCORD_CLIENT_ID!), {
       body: commands,
     });
 
