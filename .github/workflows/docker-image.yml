@@ -26,10 +26,6 @@ jobs:
         run: |
           echo "IMAGE_TAG=main" >> $GITHUB_ENV
           echo "BUILD_DIR=deltakpibot" >> $GITHUB_ENV
-          echo "DATABASE_URL=${{ secrets.DATABASE_URL }}" >> $GITHUB_ENV
-          echo "DISCORD_TOKEN=${{secrets.DISCORD_TOKEN}}" >> $GITHUB_ENV
-          echo "DISCORD_CLIENT_ID=${{secrets.DISCORD_CLIENT_ID}}" >> $GITHUB_ENV
-
       - name: Log in to the Container registry
         uses: docker/login-action@v2
         with:
