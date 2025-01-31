@@ -77,9 +77,9 @@ export const command = {
       .setCustomId("select-tracked-channels")
       .setPlaceholder("Selecciona los canales para seguimiento")
       .setMinValues(0)
-      .setMaxValues(textChannels.length)
+      .setMaxValues(Math.min(textChannels.length, 25)) // Evita que supere el límite de Discord
       .addOptions(
-        textChannels.map((channel: any) => ({
+        textChannels.slice(0, 25).map((channel: any) => ({
           label: channel.label,
           value: channel.value,
           default: trackedChannelIds.includes(channel.value),
