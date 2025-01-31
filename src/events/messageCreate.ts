@@ -60,8 +60,10 @@ async function handleMentions(message: Message, guildId: string) {
           roleId: trackedRoles.find((role) =>
             member.roles.cache.has(role.roleId)
           )?.roleId as string, // ID del primer rol coincidente
-          mentionedId: userId,
+          mentionedId: member.id,
+          mentionedName: member.user.username,
           authorId: message.author.id,
+          authorName: message.author.username,
           createdAt: new Date(),
         },
       });

@@ -57,6 +57,8 @@ model MentionRecord {
   roleId      String // ID del rol mencionado
   mentionedId String // ID del usuario mencionado
   authorId    String // ID del usuario que mencionó
+  mentionedName String? // Nombre del usuario mencionado
+  authorName    String? // Nombre del usuario que mencionó
   createdAt   DateTime  @default(now()) // Cuándo ocurrió la mención
   respondedAt DateTime? // Cuándo respondió la persona mencionada
 }
