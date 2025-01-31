@@ -1,10 +1,13 @@
 import {
   SlashCommandBuilder,
   InteractionContextType,
-  Guild,
-  ActionRowBuilder,
   StringSelectMenuBuilder,
+  ActionRowBuilder,
   StringSelectMenuInteraction,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
+  Guild,
 } from "discord.js";
 import { getOwnedGuilds } from "../../utils";
 import prisma from "../../db";
@@ -12,8 +15,9 @@ import prisma from "../../db";
 export const command = {
   data: new SlashCommandBuilder()
     .setName("setserver")
-    .setDescription("Set the current server for configure it.")
+    .setDescription("Set the current server to configure it.")
     .setContexts(InteractionContextType.BotDM),
+
   async execute(interaction: any) {
     if (interaction.guild) {
       await interaction.reply(
@@ -39,70 +43,137 @@ export const command = {
       (guild: Guild) => guild.ownerId === interaction.user.id
     );
 
-    const guildOptions = guilds.map((guild: Guild) => ({
+    if (guilds.size === 0) {
+      return interaction.reply(
+        "You do not own any servers where I am a member."
+      );
+    }
+
+    const guildOptions = guilds.map((guild) => ({
       label: guild.name,
       value: guild.id,
     }));
 
-    const selectMenu = new StringSelectMenuBuilder()
-      .setCustomId("select-server")
-      .setPlaceholder("Selecciona un servidor")
-      .addOptions(guildOptions);
+    let page = 0;
+    const pageSize = 10;
+
+    const generateSelectMenu = () => {
+      const options = guildOptions
+        .slice(page * pageSize, (page + 1) * pageSize)
+        .map((guild) => ({
+          label: guild.label,
+          value: guild.value,
+        }));
+
+      return new StringSelectMenuBuilder()
+        .setCustomId("select-server")
+        .setPlaceholder("Select a server to configure")
+        .addOptions(options);
+    };
 
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      selectMenu
+      generateSelectMenu()
     );
 
-    const sentMessage = await interaction.reply({
-      content:
-        "Select the server you want to configure from the dropdown menu:",
-      components: [row],
+    const prevButton = new ButtonBuilder()
+      .setCustomId("prev-page")
+      .setLabel("⬅️ Previous")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page === 0);
+
+    const nextButton = new ButtonBuilder()
+      .setCustomId("next-page")
+      .setLabel("Next ➡️")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled((page + 1) * pageSize >= guildOptions.length);
+
+    const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      prevButton,
+      nextButton
+    );
+
+    const message = await interaction.reply({
+      content: "Select the server you want to configure:",
+      components: [row, buttonRow],
     });
 
-    const filter = (interaction: any) =>
-      interaction.user.id === interaction.user.id &&
-      interaction.customId === "select-server";
-
-    const collector = sentMessage.createMessageComponentCollector({
-      filter,
-      time: 60000, // 1 minuto para seleccionar
+    const collector = message.createMessageComponentCollector({
+      componentType: ComponentType.StringSelect,
+      time: 60000,
     });
 
-    collector.on("collect", async (interaction: any) => {
-      const selectedGuildId = (interaction as StringSelectMenuInteraction)
-        .values[0];
+    collector.on("collect", async (i: StringSelectMenuInteraction) => {
+      if (i.user.id !== interaction.user.id) return;
+
+      const selectedGuildId = i.values[0];
       const selectedGuild =
         interaction.client.guilds.cache.get(selectedGuildId);
 
       if (!selectedGuild) {
-        return interaction.reply({
+        return i.reply({
           content: "There was an error selecting the server. Try again later.",
           ephemeral: true,
         });
       }
 
-      // Guardar el servidor seleccionado en la base de datos
+      // Save selected server in the database
       await prisma.userContext.upsert({
         where: { userId: interaction.user.id },
         update: { guildId: selectedGuildId },
         create: { userId: interaction.user.id, guildId: selectedGuildId },
       });
 
-      await interaction.reply({
-        content: `You have selected **${selectedGuild.name}** as the server to configure.`,
+      await i.reply({
+        content: `✅ You have selected **${selectedGuild.name}** as the server to configure.`,
         ephemeral: true,
       });
 
       collector.stop();
     });
 
-    collector.on("end", (collected: any) => {
-      if (collected.size === 0) {
-        interaction.reply(
-          "You did not select any server. Use `/setserver <server name>` to select one."
-        );
-      }
+    const buttonCollector = message.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      time: 60000,
     });
-    //await interaction.reply(helpMessage);
+
+    buttonCollector.on("collect", async (i) => {
+      if (i.user.id !== interaction.user.id) return;
+
+      if (i.customId === "prev-page" && page > 0) {
+        page--;
+      } else if (
+        i.customId === "next-page" &&
+        (page + 1) * pageSize < guildOptions.length
+      ) {
+        page++;
+      }
+
+      const newRow =
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+          generateSelectMenu()
+        );
+
+      const newPrevButton = new ButtonBuilder()
+        .setCustomId("prev-page")
+        .setLabel("⬅️ Previous")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(page === 0);
+
+      const newNextButton = new ButtonBuilder()
+        .setCustomId("next-page")
+        .setLabel("Next ➡️")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled((page + 1) * pageSize >= guildOptions.length);
+
+      const newButtonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        newPrevButton,
+        newNextButton
+      );
+
+      await i.update({
+        content: "Select the server you want to configure:",
+        components: [newRow, newButtonRow],
+      });
+    });
   },
 };

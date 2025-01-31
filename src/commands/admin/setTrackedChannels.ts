@@ -1,11 +1,13 @@
 import {
   SlashCommandBuilder,
   InteractionContextType,
-  Guild,
-  ActionRowBuilder,
   StringSelectMenuBuilder,
+  ActionRowBuilder,
   StringSelectMenuInteraction,
-  Channel,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
+  Guild,
   ChannelType,
 } from "discord.js";
 import { getOwnedGuilds } from "../../utils";
@@ -16,6 +18,7 @@ export const command = {
     .setName("settrackedchannels")
     .setDescription("Set tracked channels for the selected server.")
     .setContexts(InteractionContextType.BotDM),
+
   async execute(interaction: any) {
     if (interaction.guild) {
       await interaction.reply(
@@ -46,7 +49,6 @@ export const command = {
     }
 
     const guild = interaction.client.guilds.cache.get(userContext.guildId);
-
     if (!guild) {
       return interaction.reply(
         "The selected server could not be found. Make sure the bot is still in the server."
@@ -54,17 +56,11 @@ export const command = {
     }
 
     const textChannels = guild.channels.cache
-      .filter((channel: any) => channel.type === ChannelType.GuildText)
-      .map((channel: any) => ({
+      .filter((channel) => channel.type === ChannelType.GuildText)
+      .map((channel) => ({
         label: channel.name,
         value: channel.id,
       }));
-
-    if (textChannels.length === 0) {
-      return interaction.reply(
-        "There are no text channels available in this server to configure."
-      );
-    }
 
     const trackedChannels = await prisma.trackedChannel.findMany({
       where: { guildId: guild.id },
@@ -73,52 +69,69 @@ export const command = {
 
     const trackedChannelIds = trackedChannels.map((tc) => tc.channelId);
 
-    const selectMenu = new StringSelectMenuBuilder()
-      .setCustomId("select-tracked-channels")
-      .setPlaceholder("Selecciona los canales para seguimiento")
-      .setMinValues(0)
-      .setMaxValues(textChannels.length)
-      .addOptions(
-        textChannels.map((channel: any) => ({
+    let page = 0;
+    const pageSize = 10;
+
+    const generateSelectMenu = () => {
+      const options = textChannels
+        .slice(page * pageSize, (page + 1) * pageSize)
+        .map((channel) => ({
           label: channel.label,
           value: channel.value,
           default: trackedChannelIds.includes(channel.value),
-        }))
-      );
+        }));
+
+      return new StringSelectMenuBuilder()
+        .setCustomId("select-tracked-channels")
+        .setPlaceholder("Select channels to track")
+        .setMinValues(0)
+        .setMaxValues(options.length)
+        .addOptions(options);
+    };
 
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      selectMenu
+      generateSelectMenu()
     );
 
-    const sentMessage = await interaction.reply({
-      content: `Select the text channels to configure them as tracking channels in **${guild.name}**:`,
-      components: [row],
+    const prevButton = new ButtonBuilder()
+      .setCustomId("prev-page")
+      .setLabel("⬅️ Previous")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page === 0);
+
+    const nextButton = new ButtonBuilder()
+      .setCustomId("next-page")
+      .setLabel("Next ➡️")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled((page + 1) * pageSize >= textChannels.length);
+
+    const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      prevButton,
+      nextButton
+    );
+
+    const message = await interaction.reply({
+      content: `Select text channels to track in **${guild.name}**:`,
+      components: [row, buttonRow],
     });
 
-    const filter = (interaction: any) =>
-      interaction.user.id === interaction.user.id &&
-      interaction.customId === "select-tracked-channels";
-
-    const collector = sentMessage.createMessageComponentCollector({
-      filter,
-      time: 60000, // 1 minuto para responder
+    const collector = message.createMessageComponentCollector({
+      componentType: ComponentType.StringSelect,
+      time: 60000,
     });
 
-    collector.on("collect", async (interaction: any) => {
-      const selectedChannelIds = (interaction as StringSelectMenuInteraction)
-        .values;
+    collector.on("collect", async (i: StringSelectMenuInteraction) => {
+      if (i.user.id !== interaction.user.id) return;
 
-      // Canales a agregar
+      const selectedChannelIds = i.values;
       const channelsToAdd = selectedChannelIds.filter(
         (id) => !trackedChannelIds.includes(id)
       );
-
-      // Canales a eliminar
       const channelsToRemove = trackedChannelIds.filter(
         (id) => !selectedChannelIds.includes(id)
       );
 
-      // Agregar nuevos canales
+      // Add new channels
       for (const channelId of channelsToAdd) {
         const channel = guild.channels.cache.get(channelId);
         if (channel) {
@@ -132,27 +145,64 @@ export const command = {
         }
       }
 
-      // Eliminar canales que ya no están seleccionados
+      // Remove unselected channels
       for (const channelId of channelsToRemove) {
         await prisma.trackedChannel.deleteMany({
           where: { guildId: guild.id, channelId },
         });
       }
 
-      await interaction.reply({
-        content: "The channels have been configured successfully.",
+      await i.reply({
+        content: "Channels have been updated successfully.",
         ephemeral: true,
       });
 
       collector.stop();
     });
 
-    collector.on("end", (collected: any) => {
-      if (collected.size === 0) {
-        interaction.reply(
-          "You did not select any channel. The command has expired."
-        );
+    const buttonCollector = message.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      time: 60000,
+    });
+
+    buttonCollector.on("collect", async (i) => {
+      if (i.user.id !== interaction.user.id) return;
+
+      if (i.customId === "prev-page" && page > 0) {
+        page--;
+      } else if (
+        i.customId === "next-page" &&
+        (page + 1) * pageSize < textChannels.length
+      ) {
+        page++;
       }
+
+      const newRow =
+        new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+          generateSelectMenu()
+        );
+
+      const newPrevButton = new ButtonBuilder()
+        .setCustomId("prev-page")
+        .setLabel("⬅️ Previous")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(page === 0);
+
+      const newNextButton = new ButtonBuilder()
+        .setCustomId("next-page")
+        .setLabel("Next ➡️")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled((page + 1) * pageSize >= textChannels.length);
+
+      const newButtonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        newPrevButton,
+        newNextButton
+      );
+
+      await i.update({
+        content: `Select text channels to track in **${guild.name}**:`,
+        components: [newRow, newButtonRow],
+      });
     });
   },
 };
