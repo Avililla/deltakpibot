@@ -10,7 +10,7 @@ import prisma from "../../db";
 
 export const command = {
   data: new SlashCommandBuilder()
-    .setName("storehistory")
+    .setName("storechannelhistory")
     .setDescription(
       "Muestra un menú desplegable con los canales trackeados para el servidor seleccionado."
     ),
