@@ -6,8 +6,152 @@ import {
   ChatInputCommandInteraction,
   TextChannel,
   Message,
+  Guild as DiscordGuild,
+  User,
 } from "discord.js";
 import prisma from "../../db";
+
+/**
+ * Función que ejecuta el proceso pesado de almacenar el histórico.
+ * Retorna un objeto con la cantidad de registros creados y respuestas actualizadas.
+ */
+async function processChannelHistory(
+  guild: DiscordGuild,
+  textChannel: TextChannel,
+  guildId: string
+): Promise<{ storedRecords: number; updatedRecords: number }> {
+  let storedRecords = 0;
+  let updatedRecords = 0;
+
+  // Obtenemos los roles trackeados para este servidor (se usa en todos los mensajes)
+  const trackedRoles = await prisma.trackedRole.findMany({
+    where: { guildId },
+    select: { roleId: true },
+  });
+
+  // Obtenemos el histórico completo de mensajes de forma paginada.
+  let allMessages: Message[] = [];
+  let lastId: string | undefined = undefined;
+
+  while (true) {
+    const fetchOptions: { limit: number; before?: string } = { limit: 100 };
+    if (lastId) fetchOptions.before = lastId;
+    const fetched = await textChannel.messages.fetch(fetchOptions);
+    if (fetched.size === 0) break;
+    allMessages.push(...fetched.values());
+    lastId = fetched.last()?.id;
+  }
+
+  // Ordenamos los mensajes de forma ascendente (más antiguos primero).
+  allMessages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+
+  console.log(
+    `Histórico del canal ${textChannel.name} (ID: ${textChannel.id}):`
+  );
+
+  // Iteramos sobre cada mensaje para procesar menciones y respuestas.
+  for (const message of allMessages) {
+    console.log(
+      `[${message.createdAt.toISOString()}] ${message.author.tag}: ${
+        message.content
+      }`
+    );
+
+    // 1. Procesamos las menciones (creación de registros)
+    if (message.mentions.users.size > 0) {
+      for (const [userId] of message.mentions.users) {
+        // Intentamos obtener el miembro correspondiente al usuario mencionado.
+        let member;
+        try {
+          member = await guild.members.fetch(userId);
+        } catch (error) {
+          console.warn(
+            `No se encontró al usuario mencionado con ID ${userId} en el mensaje ${message.id}. Se ignora esta mención.`
+          );
+          continue; // Si no se encuentra el miembro, se ignora esta mención.
+        }
+
+        // Verificamos si el miembro tiene alguno de los roles trackeados.
+        const matchingRole = trackedRoles.find((role) =>
+          member.roles.cache.has(role.roleId)
+        );
+        if (!matchingRole) {
+          console.warn(
+            `El usuario ${member.user.username} no posee ningún rol trackeado en el mensaje ${message.id}. Se ignora esta mención.`
+          );
+          continue; // Si el miembro no tiene roles trackeados, se ignora la mención.
+        }
+
+        // Verificamos si ya existe un registro para esta mención.
+        const existingRecord = await prisma.mentionRecord.findFirst({
+          where: {
+            guildId,
+            channelId: message.channel.id,
+            roleId: matchingRole.roleId,
+            mentionedId: member.id,
+            authorId: message.author.id,
+            createdAt: message.createdAt,
+          },
+        });
+
+        if (existingRecord) {
+          console.log(
+            `El registro de mención ya existe para el mensaje ${message.id} y usuario ${member.user.username}.`
+          );
+          continue;
+        }
+
+        // Creamos el registro de mención en la base de datos.
+        await prisma.mentionRecord.create({
+          data: {
+            guildId,
+            channelId: message.channel.id,
+            roleId: matchingRole.roleId,
+            mentionedId: member.id,
+            mentionedName: member.user.username,
+            authorId: message.author.id,
+            authorName: message.author.username,
+            createdAt: message.createdAt,
+          },
+        });
+        storedRecords++;
+        console.log(
+          `Registro de mención creado para ${member.user.username} en el mensaje ${message.id}`
+        );
+      }
+    }
+
+    // 2. Verificamos si el mensaje es una respuesta a una mención pendiente.
+    try {
+      const pendingMention = await prisma.mentionRecord.findFirst({
+        where: {
+          guildId,
+          channelId: message.channel.id,
+          mentionedId: message.author.id,
+          respondedAt: null,
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (pendingMention) {
+        await prisma.mentionRecord.update({
+          where: { id: pendingMention.id },
+          data: { respondedAt: message.createdAt },
+        });
+        updatedRecords++;
+        console.log(
+          `Registro de mención actualizado para ${message.author.username} en el mensaje ${message.id}`
+        );
+      }
+    } catch (error) {
+      console.error(
+        `Error actualizando la respuesta en el mensaje ${message.id}:`,
+        error
+      );
+    }
+  }
+
+  return { storedRecords, updatedRecords };
+}
 
 export const command = {
   data: new SlashCommandBuilder()
@@ -116,139 +260,37 @@ export const command = {
       // Asumimos que es un TextChannel.
       const textChannel = channelFromGuild as TextChannel;
 
-      // Obtenemos el histórico completo de mensajes de forma paginada.
-      let allMessages: Message[] = [];
-      let lastId: string | undefined = undefined;
-
-      while (true) {
-        const fetchOptions: { limit: number; before?: string } = { limit: 100 };
-        if (lastId) fetchOptions.before = lastId;
-        const fetched = await textChannel.messages.fetch(fetchOptions);
-        if (fetched.size === 0) break;
-        allMessages.push(...fetched.values());
-        lastId = fetched.last()?.id;
-      }
-
-      // Ordenamos los mensajes de forma ascendente (más antiguos primero).
-      allMessages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-      console.log(
-        `Histórico del canal ${textChannel.name} (ID: ${selectedChannelId}):`
-      );
-
-      // Variables para contar registros creados y respuestas actualizadas.
-      let storedRecords = 0;
-      let updatedRecords = 0;
-      // Obtenemos los roles trackeados para este servidor (se usa en todos los mensajes)
-      const trackedRoles = await prisma.trackedRole.findMany({
-        where: { guildId },
-        select: { roleId: true },
+      // Confirmamos al usuario que el proceso se iniciará en segundo plano.
+      await selectInteraction.update({
+        content:
+          "Proceso iniciado en segundo plano. Recibirás un DM al finalizar.",
+        components: [],
       });
 
-      // Iteramos sobre cada mensaje para procesar menciones y respuestas.
-      for (const message of allMessages) {
-        console.log(
-          `[${message.createdAt.toISOString()}] ${message.author.tag}: ${
-            message.content
-          }`
-        );
-        // 1. Procesamos las menciones (creación de registros)
-        if (message.mentions.users.size > 0) {
-          for (const [userId] of message.mentions.users) {
-            // Intentamos obtener el miembro correspondiente al usuario mencionado.
-            let member;
-            try {
-              member = await guild.members.fetch(userId);
-            } catch (error) {
-              console.warn(
-                `No se encontró al usuario mencionado con ID ${userId} en el mensaje ${message.id}. Se ignora esta mención.`
-              );
-              continue; // Si no se encuentra el miembro, se ignora esta mención.
-            }
-
-            // Verificamos si el miembro tiene alguno de los roles trackeados.
-            const matchingRole = trackedRoles.find((role) =>
-              member.roles.cache.has(role.roleId)
-            );
-            if (!matchingRole) {
-              console.warn(
-                `El usuario ${member.user.username} no posee ningún rol trackeado en el mensaje ${message.id}. Se ignora esta mención.`
-              );
-              continue; // Si el miembro no tiene roles trackeados, se ignora la mención.
-            }
-
-            // Verificamos si ya existe un registro para esta mención.
-            const existingRecord = await prisma.mentionRecord.findFirst({
-              where: {
-                guildId,
-                channelId: message.channel.id,
-                roleId: matchingRole.roleId,
-                mentionedId: member.id,
-                authorId: message.author.id,
-                createdAt: message.createdAt,
-              },
-            });
-
-            if (existingRecord) {
-              console.log(
-                `El registro de mención ya existe para el mensaje ${message.id} y usuario ${member.user.username}.`
-              );
-              continue;
-            }
-
-            // Creamos el registro de mención en la base de datos.
-            await prisma.mentionRecord.create({
-              data: {
-                guildId,
-                channelId: message.channel.id,
-                roleId: matchingRole.roleId,
-                mentionedId: member.id,
-                mentionedName: member.user.username,
-                authorId: message.author.id,
-                authorName: message.author.username,
-                createdAt: message.createdAt,
-              },
-            });
-            storedRecords++;
-            console.log(
-              `Registro de mención creado para ${member.user.username} en el mensaje ${message.id}`
-            );
-          }
-        }
-
-        // 2. Verificamos si el mensaje es una respuesta a una mención pendiente.
+      // Ejecutamos el proceso pesado sin bloquear la ejecución del bot.
+      setImmediate(async () => {
         try {
-          const pendingMention = await prisma.mentionRecord.findFirst({
-            where: {
-              guildId,
-              channelId: message.channel.id,
-              mentionedId: message.author.id,
-              respondedAt: null,
-            },
-            orderBy: { createdAt: "desc" },
-          });
-          if (pendingMention) {
-            await prisma.mentionRecord.update({
-              where: { id: pendingMention.id },
-              data: { respondedAt: message.createdAt },
-            });
-            updatedRecords++;
-            console.log(
-              `Registro de mención actualizado para ${message.author.username} en el mensaje ${message.id}`
-            );
-          }
+          const result = await processChannelHistory(
+            guild,
+            textChannel,
+            guildId
+          );
+          // Obtenemos al usuario para enviarle el DM.
+          const user: User = await interaction.client.users.fetch(
+            interaction.user.id
+          );
+          await user.send(
+            `Proceso finalizado en el canal **${textChannel.name}**.\nRegistros creados: ${result.storedRecords}\nRespuestas actualizadas: ${result.updatedRecords}.`
+          );
         } catch (error) {
-          console.error(
-            `Error actualizando la respuesta en el mensaje ${message.id}:`,
-            error
+          console.error("Error en proceso en background:", error);
+          const user: User = await interaction.client.users.fetch(
+            interaction.user.id
+          );
+          await user.send(
+            `Ocurrió un error al procesar el histórico en el canal **${textChannel.name}**.`
           );
         }
-      }
-
-      // Confirmamos al usuario que se ha almacenado el histórico y actualizado las respuestas.
-      await selectInteraction.update({
-        content: `✅ Histórico procesado en el canal **${textChannel.name}**.\nRegistros creados: ${storedRecords}.\nRespuestas actualizadas: ${updatedRecords}.`,
-        components: [],
       });
     } catch (error) {
       console.error(
