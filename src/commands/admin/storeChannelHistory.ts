@@ -5,6 +5,7 @@ import {
   ComponentType,
   ChatInputCommandInteraction,
   TextChannel,
+  Message,
 } from "discord.js";
 import prisma from "../../db";
 
@@ -12,7 +13,7 @@ export const command = {
   data: new SlashCommandBuilder()
     .setName("storechannelhistory")
     .setDescription(
-      "Muestra un menú desplegable con los canales trackeados para el servidor seleccionado."
+      "Muestra un menú desplegable con los canales trackeados y almacena el histórico de menciones del canal seleccionado."
     ),
 
   async execute(interaction: ChatInputCommandInteraction) {
@@ -60,7 +61,7 @@ export const command = {
 
     const selectMenu = new StringSelectMenuBuilder()
       .setCustomId("trackedChannelsSelect")
-      .setPlaceholder("Selecciona un canal para mostrar su histórico")
+      .setPlaceholder("Selecciona un canal para almacenar su histórico")
       .addOptions(options);
 
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
@@ -70,7 +71,7 @@ export const command = {
     // Enviamos el mensaje con el menú desplegable.
     const replyMessage = await interaction.reply({
       content:
-        "Selecciona un canal trackeado para mostrar su histórico (desde el día 1):",
+        "Selecciona un canal trackeado para almacenar el histórico de menciones:",
       components: [row],
       ephemeral: true,
       fetchReply: true,
@@ -101,7 +102,6 @@ export const command = {
       }
 
       const channelFromGuild = guild.channels.cache.get(selectedChannelId);
-      // Verificamos que el canal sea de texto y que disponga de la propiedad 'messages'
       if (
         !channelFromGuild ||
         !channelFromGuild.isTextBased() ||
@@ -119,13 +119,13 @@ export const command = {
       const textChannel = channelFromGuild as TextChannel;
 
       // Obtenemos el histórico completo de mensajes de forma paginada.
-      let allMessages = [];
+      let allMessages: Message[] = [];
       let lastId: string | undefined = undefined;
 
       while (true) {
-        const options: { limit: number; before?: string } = { limit: 100 };
-        if (lastId) options.before = lastId;
-        const fetched = await textChannel.messages.fetch(options);
+        const fetchOptions: { limit: number; before?: string } = { limit: 100 };
+        if (lastId) fetchOptions.before = lastId;
+        const fetched = await textChannel.messages.fetch(fetchOptions);
         if (fetched.size === 0) break;
         allMessages.push(...fetched.values());
         lastId = fetched.last()?.id;
@@ -134,21 +134,75 @@ export const command = {
       // Ordenamos los mensajes de forma ascendente (más antiguos primero).
       allMessages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-      // Mostramos el histórico en la consola.
       console.log(
         `Histórico del canal ${textChannel.name} (ID: ${selectedChannelId}):`
       );
+
+      // Variable para contar los registros creados
+      let storedRecords = 0;
+      // Obtenemos los roles trackeados para este servidor (se usa en todos los mensajes)
+      const trackedRoles = await prisma.trackedRole.findMany({
+        where: { guildId },
+        select: { roleId: true },
+      });
+
+      // Iteramos sobre cada mensaje para almacenar menciones (si existen)
       for (const message of allMessages) {
         console.log(
           `[${message.createdAt.toISOString()}] ${message.author.tag}: ${
             message.content
           }`
         );
+        // Si el mensaje no tiene menciones, lo ignoramos
+        if (message.mentions.users.size === 0) continue;
+
+        for (const [userId, user] of message.mentions.users) {
+          // Intentamos obtener el miembro correspondiente al usuario mencionado
+          let member;
+          try {
+            member = await guild.members.fetch(userId);
+          } catch (error) {
+            console.warn(
+              `No se encontró al usuario mencionado con ID ${userId} en el mensaje ${message.id}. Se ignora este mensaje.`
+            );
+            continue; // Si no se encuentra el miembro, se ignora la mención
+          }
+
+          // Verificamos si el miembro tiene alguno de los roles trackeados
+          const matchingRole = trackedRoles.find((role) =>
+            member.roles.cache.has(role.roleId)
+          );
+
+          if (!matchingRole) {
+            console.warn(
+              `El usuario ${member.user.username} no posee ningún rol trackeado en el mensaje ${message.id}. Se ignora este mensaje.`
+            );
+            continue; // Si el miembro no tiene roles trackeados, se ignora la mención
+          }
+
+          // Creamos el registro de mención en la base de datos
+          await prisma.mentionRecord.create({
+            data: {
+              guildId,
+              channelId: message.channel.id,
+              roleId: matchingRole.roleId,
+              mentionedId: member.id,
+              mentionedName: member.user.username,
+              authorId: message.author.id,
+              authorName: message.author.username,
+              createdAt: message.createdAt,
+            },
+          });
+          storedRecords++;
+          console.log(
+            `Registro de mención creado para ${member.user.username} en el mensaje ${message.id}`
+          );
+        }
       }
 
-      // Confirmamos al usuario que se ha mostrado el histórico.
+      // Confirmamos al usuario que se ha almacenado el histórico de menciones.
       await selectInteraction.update({
-        content: `✅ Se ha mostrado en la consola el histórico del canal **${textChannel.name}**.`,
+        content: `✅ Se ha almacenado el histórico de menciones del canal **${textChannel.name}**.\nRegistros creados: ${storedRecords}.`,
         components: [],
       });
     } catch (error) {
