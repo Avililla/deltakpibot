@@ -136,71 +136,99 @@ export const command = {
         `Histórico del canal ${textChannel.name} (ID: ${selectedChannelId}):`
       );
 
-      // Variable para contar los registros creados
+      // Variables para contar registros creados y respuestas actualizadas.
       let storedRecords = 0;
+      let updatedRecords = 0;
       // Obtenemos los roles trackeados para este servidor (se usa en todos los mensajes)
       const trackedRoles = await prisma.trackedRole.findMany({
         where: { guildId },
         select: { roleId: true },
       });
 
-      // Iteramos sobre cada mensaje para almacenar menciones (si existen)
+      // Iteramos sobre cada mensaje para procesar menciones y respuestas.
       for (const message of allMessages) {
         console.log(
           `[${message.createdAt.toISOString()}] ${message.author.tag}: ${
             message.content
           }`
         );
-        // Si el mensaje no tiene menciones, lo ignoramos
-        if (message.mentions.users.size === 0) continue;
+        // 1. Procesamos las menciones (creación de registros)
+        if (message.mentions.users.size > 0) {
+          for (const [userId] of message.mentions.users) {
+            // Intentamos obtener el miembro correspondiente al usuario mencionado.
+            let member;
+            try {
+              member = await guild.members.fetch(userId);
+            } catch (error) {
+              console.warn(
+                `No se encontró al usuario mencionado con ID ${userId} en el mensaje ${message.id}. Se ignora este mensaje.`
+              );
+              continue; // Si no se encuentra el miembro, se ignora esta mención.
+            }
 
-        for (const [userId, user] of message.mentions.users) {
-          // Intentamos obtener el miembro correspondiente al usuario mencionado
-          let member;
-          try {
-            member = await guild.members.fetch(userId);
-          } catch (error) {
-            console.warn(
-              `No se encontró al usuario mencionado con ID ${userId} en el mensaje ${message.id}. Se ignora este mensaje.`
+            // Verificamos si el miembro tiene alguno de los roles trackeados.
+            const matchingRole = trackedRoles.find((role) =>
+              member.roles.cache.has(role.roleId)
             );
-            continue; // Si no se encuentra el miembro, se ignora la mención
-          }
+            if (!matchingRole) {
+              console.warn(
+                `El usuario ${member.user.username} no posee ningún rol trackeado en el mensaje ${message.id}. Se ignora esta mención.`
+              );
+              continue; // Si el miembro no tiene roles trackeados, se ignora la mención.
+            }
 
-          // Verificamos si el miembro tiene alguno de los roles trackeados
-          const matchingRole = trackedRoles.find((role) =>
-            member.roles.cache.has(role.roleId)
-          );
-
-          if (!matchingRole) {
-            console.warn(
-              `El usuario ${member.user.username} no posee ningún rol trackeado en el mensaje ${message.id}. Se ignora este mensaje.`
+            // Creamos el registro de mención en la base de datos.
+            await prisma.mentionRecord.create({
+              data: {
+                guildId,
+                channelId: message.channel.id,
+                roleId: matchingRole.roleId,
+                mentionedId: member.id,
+                mentionedName: member.user.username,
+                authorId: message.author.id,
+                authorName: message.author.username,
+                createdAt: message.createdAt,
+              },
+            });
+            storedRecords++;
+            console.log(
+              `Registro de mención creado para ${member.user.username} en el mensaje ${message.id}`
             );
-            continue; // Si el miembro no tiene roles trackeados, se ignora la mención
           }
+        }
 
-          // Creamos el registro de mención en la base de datos
-          await prisma.mentionRecord.create({
-            data: {
+        // 2. Verificamos si el mensaje es una respuesta a una mención pendiente.
+        try {
+          const pendingMention = await prisma.mentionRecord.findFirst({
+            where: {
               guildId,
               channelId: message.channel.id,
-              roleId: matchingRole.roleId,
-              mentionedId: member.id,
-              mentionedName: member.user.username,
-              authorId: message.author.id,
-              authorName: message.author.username,
-              createdAt: message.createdAt,
+              mentionedId: message.author.id,
+              respondedAt: null,
             },
+            orderBy: { createdAt: "desc" },
           });
-          storedRecords++;
-          console.log(
-            `Registro de mención creado para ${member.user.username} en el mensaje ${message.id}`
+          if (pendingMention) {
+            await prisma.mentionRecord.update({
+              where: { id: pendingMention.id },
+              data: { respondedAt: message.createdAt },
+            });
+            updatedRecords++;
+            console.log(
+              `Registro de mención actualizado para ${message.author.username} en el mensaje ${message.id}`
+            );
+          }
+        } catch (error) {
+          console.error(
+            `Error actualizando la respuesta en el mensaje ${message.id}:`,
+            error
           );
         }
       }
 
-      // Confirmamos al usuario que se ha almacenado el histórico de menciones.
+      // Confirmamos al usuario que se ha almacenado el histórico y actualizado las respuestas.
       await selectInteraction.update({
-        content: `✅ Se ha almacenado el histórico de menciones del canal **${textChannel.name}**.\nRegistros creados: ${storedRecords}.`,
+        content: `✅ Histórico procesado en el canal **${textChannel.name}**.\nRegistros creados: ${storedRecords}.\nRespuestas actualizadas: ${updatedRecords}.`,
         components: [],
       });
     } catch (error) {
