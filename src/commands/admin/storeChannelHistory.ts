@@ -12,9 +12,7 @@ import prisma from "../../db";
 export const command = {
   data: new SlashCommandBuilder()
     .setName("storechannelhistory")
-    .setDescription(
-      "Muestra un menú desplegable con los canales trackeados y almacena el histórico de menciones del canal seleccionado."
-    ),
+    .setDescription("Store channel history."),
 
   async execute(interaction: ChatInputCommandInteraction) {
     // Este comando se usará solo en DM.
