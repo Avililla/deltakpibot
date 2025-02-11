@@ -161,7 +161,7 @@ export const command = {
               member = await guild.members.fetch(userId);
             } catch (error) {
               console.warn(
-                `No se encontró al usuario mencionado con ID ${userId} en el mensaje ${message.id}. Se ignora este mensaje.`
+                `No se encontró al usuario mencionado con ID ${userId} en el mensaje ${message.id}. Se ignora esta mención.`
               );
               continue; // Si no se encuentra el miembro, se ignora esta mención.
             }
@@ -175,6 +175,25 @@ export const command = {
                 `El usuario ${member.user.username} no posee ningún rol trackeado en el mensaje ${message.id}. Se ignora esta mención.`
               );
               continue; // Si el miembro no tiene roles trackeados, se ignora la mención.
+            }
+
+            // Verificamos si ya existe un registro para esta mención.
+            const existingRecord = await prisma.mentionRecord.findFirst({
+              where: {
+                guildId,
+                channelId: message.channel.id,
+                roleId: matchingRole.roleId,
+                mentionedId: member.id,
+                authorId: message.author.id,
+                createdAt: message.createdAt,
+              },
+            });
+
+            if (existingRecord) {
+              console.log(
+                `El registro de mención ya existe para el mensaje ${message.id} y usuario ${member.user.username}.`
+              );
+              continue;
             }
 
             // Creamos el registro de mención en la base de datos.
