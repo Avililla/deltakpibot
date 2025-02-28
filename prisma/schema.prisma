@@ -55,6 +55,7 @@ model MentionRecord {
   guildId     String
   channelId   String // ID del canal donde ocurrió la mención
   roleId      String // ID del rol mencionado
+  messageId   String // ID del mensaje donde ocurrió la mención
   mentionedId String // ID del usuario mencionado
   authorId    String // ID del usuario que mencionó
   mentionedName String? // Nombre del usuario mencionado

@@ -87,6 +87,7 @@ async function processChannelHistory(
           where: {
             guildId,
             channelId: message.channel.id,
+            messageId: message.id,
             roleId: matchingRole.roleId,
             mentionedId: member.id,
             authorId: message.author.id,
@@ -107,6 +108,7 @@ async function processChannelHistory(
             guildId,
             channelId: message.channel.id,
             roleId: matchingRole.roleId,
+            messageId: message.id,
             mentionedId: member.id,
             mentionedName: member.user.username,
             authorId: message.author.id,
