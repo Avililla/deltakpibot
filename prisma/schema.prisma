@@ -54,7 +54,6 @@ model MentionRecord {
   guild       Guild     @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
   guildId     String
   channelId   String // ID del canal donde ocurrió la mención
-  roleId      String // ID del rol mencionado
   messageId   String // ID del mensaje donde ocurrió la mención
   mentionedId String // ID del usuario mencionado
   authorId    String // ID del usuario que mencionó
@@ -62,6 +61,7 @@ model MentionRecord {
   authorName    String? // Nombre del usuario que mencionó
   createdAt   DateTime  @default(now()) // Cuándo ocurrió la mención
   respondedAt DateTime? // Cuándo respondió la persona mencionada
+  closedResponseMessageId String? // ID del mensaje de respuesta
 }
 
 model UserContext {
