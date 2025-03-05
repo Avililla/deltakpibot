@@ -192,43 +192,71 @@ async function processChannel(
 
     console.log(`🔍 Canal ${channelId} encontrado, tipo: ${channel.type}`);
 
+    // Solo para la primera pasada obtenemos el lastStoredAt
+    const trackedChannelRecord = await prisma.trackedChannel.findUnique({
+      where: { channelId },
+    });
+    const lastStoredAt = isFirstPass
+      ? trackedChannelRecord?.lastStoredAt ?? null
+      : null;
+
+    let newLastStoredAt: Date | null = null;
+
     if (channel.type === 0 || channel.type === 5) {
-      await processMessages(
+      newLastStoredAt = await processMessages(
         guild,
         channel as TextChannel | ThreadChannel,
         channelId,
         trackedRoles,
-        isFirstPass
+        isFirstPass,
+        lastStoredAt
       );
     } else if (channel.type === 15) {
       console.log(`📌 Procesando foro: ${channel.name}`);
-      const threads = await channel.threads.fetchActive();
-      for (const [_, thread] of threads.threads) {
-        await processMessages(
+      for (const [_, thread] of (await channel.threads.fetchActive()).threads) {
+        const threadLast = await processMessages(
           guild,
           thread as ThreadChannel,
           thread.id,
           trackedRoles,
-          isFirstPass
+          isFirstPass,
+          lastStoredAt
         );
+        if (threadLast && (!newLastStoredAt || threadLast > newLastStoredAt)) {
+          newLastStoredAt = threadLast;
+        }
       }
-      const archivedThreads = await channel.threads.fetchArchived({
-        limit: 50,
-      });
-      for (const [_, thread] of archivedThreads.threads) {
-        await processMessages(
+      for (const [_, thread] of (
+        await channel.threads.fetchArchived({ limit: 50 })
+      ).threads) {
+        const threadLast = await processMessages(
           guild,
           thread as ThreadChannel,
           thread.id,
           trackedRoles,
-          isFirstPass
+          isFirstPass,
+          lastStoredAt
         );
+        if (threadLast && (!newLastStoredAt || threadLast > newLastStoredAt)) {
+          newLastStoredAt = threadLast;
+        }
       }
     } else {
       console.error(
         `⚠️ Canal ${channelId} encontrado pero NO es de texto, anuncios ni foro.`
       );
       return;
+    }
+
+    // Actualizamos el lastStoredAt en BD solo en la primera pasada.
+    if (isFirstPass && newLastStoredAt) {
+      await prisma.trackedChannel.update({
+        where: { channelId },
+        data: { lastStoredAt: newLastStoredAt },
+      });
+      console.log(
+        `✅ Última fecha procesada para el canal ${channelId} actualizada a ${newLastStoredAt.toISOString()}`
+      );
     }
   } catch (error) {
     console.error(`❌ Error procesando canal ${channelId}:`, error);
@@ -240,21 +268,50 @@ async function processMessages(
   channel: TextChannel | ThreadChannel,
   channelId: string,
   trackedRoles: string[],
-  isFirstPass: boolean
-) {
+  isFirstPass: boolean,
+  lastStoredAt: Date | null
+): Promise<Date | null> {
   console.log(`📥 Obteniendo mensajes de #${channel.name} (${channelId})...`);
   let lastMessageId: string | undefined;
+  // Solo en primera pasada acumulamos el timestamp de los mensajes nuevos.
+  let newLastStoredAt: Date | null = isFirstPass ? lastStoredAt : null;
+  let stopFetching = false;
   const userMentionRegex = /<@!?(\d+)>/g;
 
-  while (true) {
+  while (!stopFetching) {
     const messages = await channel.messages.fetch({
       limit: 100,
       before: lastMessageId,
     });
     if (messages.size === 0) break;
 
+    // Solo en la primera pasada: si el mensaje más antiguo del lote es anterior o igual a lastStoredAt, detenemos.
+    if (
+      isFirstPass &&
+      lastStoredAt &&
+      messages.last() &&
+      messages.last()!.createdAt <= lastStoredAt
+    ) {
+      stopFetching = true;
+    }
+
     for (const msg of messages.values()) {
+      // Solo en la primera pasada filtramos mensajes que ya fueron procesados.
+      if (isFirstPass && lastStoredAt && msg.createdAt <= lastStoredAt) {
+        stopFetching = true;
+        break;
+      }
+
+      // Acumulamos el timestamp en la primera pasada para actualizar lastStoredAt.
+      if (
+        isFirstPass &&
+        (!newLastStoredAt || msg.createdAt > newLastStoredAt)
+      ) {
+        newLastStoredAt = msg.createdAt;
+      }
+
       if (isFirstPass) {
+        // Primera pasada: registrar las menciones en el mensaje.
         let match;
         while ((match = userMentionRegex.exec(msg.content)) !== null) {
           const mentionedId = match[1];
@@ -267,8 +324,17 @@ async function processMessages(
             const roles = member.roles.cache.map((role) => role.id);
             if (roles.some((role) => trackedRoles.includes(role))) {
               try {
-                await prisma.mentionRecord.create({
-                  data: {
+                await prisma.mentionRecord.upsert({
+                  where: {
+                    // Utilizamos la clave compuesta: messageId, channelId y guildId
+                    messageId_channelId_guildId: {
+                      messageId: msg.id,
+                      channelId: channelId,
+                      guildId: guild.id,
+                    },
+                  },
+                  update: {},
+                  create: {
                     guildId: guild.id,
                     channelId: channelId,
                     messageId: msg.id,
@@ -280,19 +346,16 @@ async function processMessages(
                   },
                 });
                 console.log(
-                  `📥 Registrada mención de usuario ${member.user.tag} en mensaje ${msg.id}`
+                  `📥 Registrada mención de ${member.user.tag} en mensaje ${msg.id}`
                 );
               } catch (error) {
-                console.error(
-                  "❌ Error al insertar mención de usuario:",
-                  error
-                );
+                console.error("❌ Error al insertar mención:", error);
               }
             }
           }
         }
       } else {
-        // Segunda pasada: Verificar respuestas a menciones previas
+        // Segunda pasada: actualizar las respuestas a las menciones.
         if (msg.reference?.messageId) {
           const referencedMessageId = msg.reference.messageId;
           const previousMention = await prisma.mentionRecord.findFirst({
@@ -302,7 +365,6 @@ async function processMessages(
               respondedAt: null,
             },
           });
-
           if (previousMention) {
             await prisma.mentionRecord.update({
               where: { id: previousMention.id },
@@ -312,7 +374,7 @@ async function processMessages(
               },
             });
             console.log(
-              `✅ Mención en mensaje ${previousMention.messageId} respondida por ${msg.author.tag} en mensaje ${msg.id}`
+              `✅ Mención en ${previousMention.messageId} respondida por ${msg.author.tag} en ${msg.id}`
             );
           }
         }
@@ -321,4 +383,6 @@ async function processMessages(
 
     lastMessageId = messages.last()?.id;
   }
+
+  return newLastStoredAt;
 }

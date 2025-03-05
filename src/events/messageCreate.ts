@@ -53,8 +53,16 @@ async function handleMentions(message: Message, guildId: string) {
 
     if (memberHasTrackedRole) {
       // Crear un registro de mención en la base de datos
-      await prisma.mentionRecord.create({
-        data: {
+      await prisma.mentionRecord.upsert({
+        where: {
+          messageId_channelId_guildId: {
+            messageId: message.id,
+            channelId: message.channel.id,
+            guildId: guildId,
+          },
+        },
+        update: {},
+        create: {
           guildId,
           channelId: message.channel.id,
           messageId: message.id,
@@ -65,7 +73,6 @@ async function handleMentions(message: Message, guildId: string) {
           createdAt: new Date(),
         },
       });
-
       console.log(
         `Registro de mención creado para el usuario ${user.username}`
       );

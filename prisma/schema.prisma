@@ -29,12 +29,13 @@ model Guild {
 
 // Modelo para Canales Trackeados
 model TrackedChannel {
-  id          String   @id @default(uuid()) // ID interno
-  guild       Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
+  id          String   @id @default(uuid())
+  guild       Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade)
   guildId     String
-  channelId   String   @unique // ID de Discord del canal trackeado
-  name        String // Nombre del canal
-  isIntensive Boolean  @default(false) // Tipo de trackeo: intensivo o no intensivo
+  channelId   String   @unique
+  name        String
+  isIntensive Boolean  @default(false)
+  lastStoredAt DateTime?
   createdAt   DateTime @default(now())
 }
 
@@ -50,18 +51,20 @@ model TrackedRole {
 
 // Modelo para Registrar Menciones (opcional)
 model MentionRecord {
-  id          String    @id @default(uuid()) // ID interno
-  guild       Guild     @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
-  guildId     String
-  channelId   String // ID del canal donde ocurrió la mención
-  messageId   String // ID del mensaje donde ocurrió la mención
-  mentionedId String // ID del usuario mencionado
-  authorId    String // ID del usuario que mencionó
-  mentionedName String? // Nombre del usuario mencionado
-  authorName    String? // Nombre del usuario que mencionó
-  createdAt   DateTime  @default(now()) // Cuándo ocurrió la mención
-  respondedAt DateTime? // Cuándo respondió la persona mencionada
-  closedResponseMessageId String? // ID del mensaje de respuesta
+  id                      String    @id @default(uuid())
+  guild                   Guild     @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade)
+  guildId                 String
+  channelId               String
+  messageId               String
+  mentionedId             String
+  authorId                String
+  mentionedName           String?
+  authorName              String?
+  createdAt               DateTime  @default(now())
+  respondedAt             DateTime?
+  closedResponseMessageId String?
+  
+  @@unique([messageId, channelId, guildId])
 }
 
 model UserContext {
