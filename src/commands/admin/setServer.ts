@@ -39,9 +39,12 @@ export const command = {
 
     console.log(interaction.user.id);
 
-    const guilds = interaction.client.guilds.cache.filter(
-      (guild: Guild) => guild.ownerId === interaction.user.id
-    );
+    //Cambio temporal
+    // const guilds = interaction.client.guilds.cache.filter(
+    //   (guild: Guild) => guild.ownerId === interaction.user.id
+    // );
+
+    const guilds = interaction.client.guilds.cache;
 
     if (guilds.size === 0) {
       return interaction.reply(

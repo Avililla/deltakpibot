@@ -55,9 +55,8 @@ async function handleMentions(message: Message, guildId: string) {
       // Crear un registro de mención en la base de datos
       await prisma.mentionRecord.upsert({
         where: {
-          messageId_channelId_guildId: {
+          messageId_guildId: {
             messageId: message.id,
-            channelId: message.channel.id,
             guildId: guildId,
           },
         },
