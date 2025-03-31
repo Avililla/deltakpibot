@@ -12,7 +12,6 @@ export async function execute(message: Message | PartialMessage) {
     }
 
     const messageId = message.id;
-    const guildId = message.guild?.id; // El guildId podría no estar disponible en PartialMessage
 
     // Intentar eliminar el registro de mención asociado al mensaje eliminado
     const deleteResult = await prisma.mentionRecord.deleteMany({
