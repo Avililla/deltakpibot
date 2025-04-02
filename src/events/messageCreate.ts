@@ -1,117 +1,209 @@
-import { Message } from "discord.js";
+import { Message, ChannelType, ThreadChannel } from "discord.js";
 import prisma from "../db";
 
 export const once = false;
 
 export async function execute(message: Message) {
   try {
-    // Ignorar mensajes de bots
+    // Ignore bot messages
     if (message.author.bot) return;
 
-    // Asegurarse de que el mensaje proviene de un servidor
+    // Ensure the message comes from a server
     if (!message.guild) return;
 
     const guildId = message.guild.id;
+    const isThread = message.channel.isThread();
+    // Use parent channel ID if it's a thread, otherwise use the channel ID
+    const baseChannelId = isThread
+      ? message.channel.parentId
+      : message.channel.id;
 
-    // 1. Manejar menciones en canales trackeados
-    await handleMentions(message, guildId);
+    // Ensure the base channel ID exists (parent ID can be null)
+    if (!baseChannelId) {
+      console.warn(
+        `Could not determine base channel ID for message ${message.id} in channel ${message.channel.id}`
+      );
+      return;
+    }
 
-    // 2. Manejar respuestas de usuarios mencionados
-    await handleResponses(message, guildId);
+    // Check if the base channel is tracked
+    const trackedChannel = await prisma.trackedChannel.findUnique({
+      where: { channelId: baseChannelId },
+      select: { channelId: true, channelType: true }, // Select type as well
+    });
+
+    // If the base channel is not tracked, ignore
+    if (!trackedChannel) return;
+
+    // --- Mention Handling ---
+    // Only handle mentions if it's a Text channel OR a thread within a Forum channel
+    if (
+      trackedChannel.channelType === ChannelType.GuildText ||
+      (trackedChannel.channelType === ChannelType.GuildForum && isThread)
+    ) {
+      await handleMentions(
+        message,
+        guildId,
+        trackedChannel.channelId,
+        isThread ? message.channel.id : undefined
+      );
+    }
+
+    // --- Response Handling ---
+    // Only handle responses if it's a Text channel OR a thread within a Forum channel
+    if (
+      trackedChannel.channelType === ChannelType.GuildText ||
+      (trackedChannel.channelType === ChannelType.GuildForum && isThread)
+    ) {
+      await handleResponses(
+        message,
+        guildId,
+        trackedChannel.channelId,
+        isThread ? message.channel.id : undefined
+      );
+    }
   } catch (error) {
-    console.error("Error en el evento messageCreate:", error);
+    console.error("Error in messageCreate event:", error);
   }
 }
 
 /**
- * Maneja menciones en canales trackeados
+ * Handles mentions in tracked channels (Text or Forum Threads)
  */
-async function handleMentions(message: Message, guildId: string) {
-  // Verificar si el canal está trackeado
-  const trackedChannel = await prisma.trackedChannel.findUnique({
-    where: { channelId: message.channel.id },
-  });
-
-  if (!trackedChannel) return; // Ignorar si no está trackeado
-
-  // Verificar menciones
+async function handleMentions(
+  message: Message,
+  guildId: string,
+  baseChannelId: string,
+  threadId?: string
+) {
+  // Check for mentions
   if (message.mentions.users.size === 0) return;
 
+  // Fetch tracked roles for the guild
+  const trackedRoles = await prisma.trackedRole.findMany({
+    where: { guildId },
+    select: { roleId: true },
+  });
+  const trackedRoleIds = trackedRoles.map((r) => r.roleId);
+
+  if (trackedRoleIds.length === 0) return; // No roles to track mentions for
+
   for (const [userId, user] of message.mentions.users) {
-    // Buscar el miembro para verificar roles
-    const member = await message.guild!.members.fetch(userId);
+    // Don't process self-mentions
+    if (userId === message.author.id) continue;
 
-    // Buscar roles trackeados en la base de datos
-    const trackedRoles = await prisma.trackedRole.findMany({
-      where: { guildId },
-      select: { roleId: true },
-    });
+    try {
+      const member = await message.guild!.members.fetch(userId);
+      const memberHasTrackedRole = member.roles.cache.hasAny(...trackedRoleIds);
 
-    const memberHasTrackedRole = trackedRoles.some((role) =>
-      member.roles.cache.has(role.roleId)
-    );
-
-    if (memberHasTrackedRole) {
-      // Crear un registro de mención en la base de datos
-      await prisma.mentionRecord.upsert({
-        where: {
-          messageId_guildId: {
-            messageId: message.id,
-            guildId: guildId,
+      if (memberHasTrackedRole) {
+        // --- Ensure Thread Exists in DB (if applicable) ---
+        if (threadId) {
+          try {
+            // Attempt to fetch the thread channel object to get its name
+            const threadChannel = message.channel as ThreadChannel;
+            await prisma.threads.upsert({
+              where: { threadId: threadId },
+              update: { name: threadChannel.name }, // Update name in case it changed
+              create: {
+                threadId: threadId,
+                name: threadChannel.name, // Use actual thread name
+                channelId: baseChannelId, // Link to parent Forum/Text channel
+                createdAt: threadChannel.createdAt || new Date(), // Use thread creation time
+              },
+            });
+          } catch (threadUpsertError) {
+            console.error(
+              `Error upserting thread ${threadId} for channel ${baseChannelId}:`,
+              threadUpsertError
+            );
+            // Decide if we should continue without linking the thread
+            // For now, we'll log the error and continue, the mention will lack the thread link
+            // You might want to handle this differently (e.g., skip the mention)
+          }
+        }
+        // --- Upsert Mention Record --- (Now safe to link threadId)
+        await prisma.mentionRecord.upsert({
+          where: {
+            messageId_guildId: {
+              messageId: message.id,
+              guildId: guildId,
+            },
           },
-        },
-        update: {},
-        create: {
-          guildId,
-          channelId: message.channel.id,
-          messageId: message.id,
-          mentionedId: member.id,
-          mentionedName: member.user.username,
-          authorId: message.author.id,
-          authorName: message.author.username,
-          createdAt: new Date(),
-        },
-      });
-      console.log(
-        `Registro de mención creado para el usuario ${user.username}`
+          update: {
+            mentionedName: member.user.tag,
+            authorName: message.author.tag,
+            threadId: threadId,
+          },
+          create: {
+            guildId,
+            channelId: baseChannelId,
+            messageId: message.id,
+            mentionedId: member.id,
+            mentionedName: member.user.tag,
+            authorId: message.author.id,
+            authorName: message.author.tag,
+            createdAt: message.createdAt,
+            threadId: threadId,
+          },
+        });
+        console.log(
+          `Mention record created/updated for user ${user.tag} in ${
+            threadId ? `thread ${threadId}` : `channel ${baseChannelId}`
+          }`
+        );
+      }
+    } catch (error) {
+      console.warn(
+        `Could not fetch member ${userId} or process mention in guild ${guildId}:`,
+        error
       );
     }
   }
 }
 
 /**
- * Maneja las respuestas de los usuarios mencionados
+ * Handles responses from mentioned users in tracked channels (Text or Forum Threads)
  */
-async function handleResponses(message: Message, guildId: string) {
-  // Verificar si hay un registro de mención pendiente para este usuario
+async function handleResponses(
+  message: Message,
+  guildId: string,
+  baseChannelId: string,
+  threadId?: string
+) {
+  // Find the most recent *unanswered* mention *to the message author* in the *same context* (channel or thread)
   const mentionRecord = await prisma.mentionRecord.findFirst({
     where: {
       guildId,
-      channelId: message.channel.id,
+      channelId: baseChannelId, // Match base channel
+      threadId: threadId, // Match thread ID (will be null for text channels, matching correctly)
       mentionedId: message.author.id,
-      respondedAt: null, // Solo menciones sin responder
+      respondedAt: null, // Only unanswered mentions
     },
     orderBy: {
-      createdAt: "desc", // Obtener la mención más reciente
+      createdAt: "desc", // Get the most recent one
     },
   });
 
-  if (!mentionRecord) return; // No hay mención pendiente
+  if (!mentionRecord) return; // No pending mention for this user in this context
 
-  // Calcular el tiempo de respuesta
-  const respondedAt = new Date();
-  const responseTime =
-    respondedAt.getTime() - mentionRecord.createdAt.getTime();
+  // Update the record with the response time
+  const respondedAt = message.createdAt; // Use message timestamp as response time
 
-  // Actualizar el registro con el tiempo de respuesta
   await prisma.mentionRecord.update({
-    where: { id: mentionRecord.id },
+    where: { id: mentionRecord.id }, // Use the specific record ID
     data: {
       respondedAt,
     },
   });
 
+  // Calculate response time for logging (optional)
+  const responseTime =
+    respondedAt.getTime() - mentionRecord.createdAt.getTime();
+
   console.log(
-    `Registro de mención actualizado para ${message.author.username}. Tiempo de respuesta: ${responseTime}ms`
+    `Mention record updated for ${message.author.tag} in ${
+      threadId ? `thread ${threadId}` : `channel ${baseChannelId}`
+    }. Response time: ${responseTime}ms`
   );
 }

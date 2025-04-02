@@ -1,4 +1,4 @@
-import { SlashCommandBuilder } from "discord.js";
+import { SlashCommandBuilder, ChannelType } from "discord.js";
 import prisma from "../../db";
 
 export const command = {
@@ -49,6 +49,18 @@ export const command = {
       });
     }
 
+    if (
+      channel.type !== ChannelType.GuildText &&
+      channel.type !== ChannelType.GuildForum
+    ) {
+      return interaction.reply({
+        content: `❌ Tracking is currently only supported for Text and Forum channels. The channel <#${channelId}> is of type ${
+          ChannelType[channel.type]
+        }.`,
+        ephemeral: true,
+      });
+    }
+
     const existingChannel = await prisma.trackedChannel.findFirst({
       where: { guildId, channelId },
     });
@@ -67,10 +79,13 @@ export const command = {
           channelId,
           guildId: guild.id,
           name: channel.name,
+          channelType: channel.type,
         },
       });
       return interaction.reply({
-        content: `✅ The channel <#${channelId}> has been **added** for tracking.`,
+        content: `✅ The channel <#${channelId}> (${
+          ChannelType[channel.type]
+        }) has been **added** for tracking.`,
         ephemeral: true,
       });
     }

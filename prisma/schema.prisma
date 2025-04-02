@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,102 +7,96 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Modelo para Servidores (Guilds)
 model Guild {
-  id              String           @id @default(uuid()) // ID interno
-  guildId         String           @unique // ID de Discord del servidor
-  name            String // Nombre del servidor
-  trackedChannels TrackedChannel[] // Canales configurados para trackeo
-  trackedRoles    TrackedRole[] // Roles configurados para trackeo
-  ownerid         String // ID del dueño del servidor
+  id              String           @id @default(uuid())
+  guildId         String           @unique
+  name            String
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+  ownerid         String
   MentionRecord   MentionRecord[]
+  trackedChannels TrackedChannel[]
+  trackedRoles    TrackedRole[]
   UserContext     UserContext[]
 }
 
-// Modelo para Canales Trackeados
 model TrackedChannel {
-  id           String    @id @default(uuid())
-  guild        Guild     @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade)
+  id           String          @id @default(uuid())
   guildId      String
-  channelId    String    @unique
+  channelId    String          @unique
   name         String
-  isIntensive  Boolean   @default(false)
+  channelType  Int
+  isIntensive  Boolean         @default(false)
+  createdAt    DateTime        @default(now())
   lastStoredAt DateTime?
-  createdAt    DateTime  @default(now())
-  threads      Threads[]
   mentions     MentionRecord[]
+  threads      Threads[]
+  guild        Guild           @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 }
 
 model Threads {
-  id        String         @id @default(uuid())
-  threadId  String         @unique
-  channel   TrackedChannel @relation(fields: [channelId], references: [channelId], onDelete: Cascade, onUpdate: Cascade)
-  channelId String
+  id        String          @id @default(uuid())
+  threadId  String          @unique
   name      String
-  createdAt DateTime       @default(now())
+  createdAt DateTime        @default(now())
+  channelId String
   mentions  MentionRecord[]
+  channel   TrackedChannel  @relation(fields: [channelId], references: [channelId], onDelete: Cascade)
 }
 
-// Modelo para Roles Trackeados
 model TrackedRole {
-  id        String   @id @default(uuid()) // ID interno
-  guild     Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
+  id        String   @id @default(uuid())
   guildId   String
-  roleId    String   @unique // ID de Discord del rol trackeado
-  name      String // Nombre del rol
+  roleId    String   @unique
+  name      String
   createdAt DateTime @default(now())
+  guild     Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 }
 
-// Modelo para Registrar Menciones (opcional)
 model MentionRecord {
   id                      String         @id @default(uuid())
-  guild                   Guild          @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade)
   guildId                 String
-  channel                 TrackedChannel @relation(fields: [channelId], references: [channelId], onDelete: Cascade, onUpdate: Cascade)
   channelId               String
-  thread                  Threads?       @relation(fields: [threadId], references: [threadId], onDelete: Cascade, onUpdate: Cascade)
-  threadId                String?        // Se llena solo si la mención es de un hilo (tipo 15)
-  messageId               String
   mentionedId             String
   authorId                String
-  mentionedName           String?
-  authorName              String?
   createdAt               DateTime       @default(now())
   respondedAt             DateTime?
+  authorName              String?
+  mentionedName           String?
+  messageId               String
   closedResponseMessageId String?
+  threadId                String?
+  channel                 TrackedChannel @relation(fields: [channelId], references: [channelId], onDelete: Cascade)
+  guild                   Guild          @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
+  thread                  Threads?       @relation(fields: [threadId], references: [threadId], onDelete: Cascade)
 
   @@unique([messageId, guildId], name: "messageId_guildId")
 }
 
 model UserContext {
   id        String   @id @default(uuid())
-  userId    String   @unique // Discord ID del usuario
-  guild     Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade, onUpdate: Cascade) // Relación con Guild
-  guildId   String // Guild ID seleccionado
+  userId    String   @unique
+  guildId   String
   updatedAt DateTime @updatedAt
+  guild     Guild    @relation(fields: [guildId], references: [guildId], onDelete: Cascade)
 }
 
-// Cosas para la web
 model User {
-  id            String          @id @default(cuid())
+  id            String           @id @default(cuid())
   name          String?
-  email         String?         @unique
+  email         String?          @unique
   password      String?
   emailVerified DateTime?
   image         String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
   accounts      Account[]
-  sessions      Session[]
-  // Optional for WebAuthn support
   Authenticator Authenticator[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  sessions      Session[]
 }
 
 model Account {
-  id                String  @id @default(cuid())
+  id                String   @id @default(cuid())
   userId            String
   type              String
   provider          String
@@ -120,11 +108,9 @@ model Account {
   scope             String?
   id_token          String?
   session_state     String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([provider, providerAccountId])
 }
@@ -134,10 +120,9 @@ model Session {
   sessionToken String   @unique
   userId       String
   expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }
 
 model VerificationToken {
@@ -148,7 +133,6 @@ model VerificationToken {
   @@unique([identifier, token])
 }
 
-// Optional for WebAuthn support
 model Authenticator {
   credentialID         String  @unique
   userId               String
@@ -158,8 +142,12 @@ model Authenticator {
   credentialDeviceType String
   credentialBackedUp   Boolean
   transports           String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, credentialID])
+}
+
+enum UserCapability {
+  CAN_MANAGE_GUILDS
+  CAN_VIEW_MENTOR_STATS
 }
