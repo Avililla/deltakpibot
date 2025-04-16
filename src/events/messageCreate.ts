@@ -11,6 +11,29 @@ export async function execute(message: Message) {
     // Ensure the message comes from a server
     if (!message.guild) return;
 
+    // Send a message to a webhook
+    const webhookUrl = process.env.WEBHOOK_URL;
+
+    if (webhookUrl) {
+      const payload = {
+        username: "DeltaKPI Bot",
+        message
+      };
+
+      try {
+        await fetch(webhookUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        console.log("Message sent to webhook successfully.");
+      } catch (error) {
+        console.error("Failed to send message to webhook:", error);
+      }
+    } else {
+      console.warn("WEBHOOK_URL is not defined. Skipping webhook notification.");
+    }
+
     const guildId = message.guild.id;
     const isThread = message.channel.isThread();
     // Use parent channel ID if it's a thread, otherwise use the channel ID
