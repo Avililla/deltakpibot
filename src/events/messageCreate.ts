@@ -13,6 +13,7 @@ export async function execute(message: Message) {
 
     // Send a message to a webhook
     const webhookUrl = process.env.WEBHOOK_URL;
+    //Prueba
 
     if (webhookUrl) {
       const payload = {
