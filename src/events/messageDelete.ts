@@ -1,6 +1,6 @@
 import { Message, PartialMessage } from "discord.js";
 import prisma from "../db";
-//Prueba 1
+//Prueba 3
 
 export const once = false;
 
